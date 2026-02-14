@@ -1,13 +1,13 @@
-import sys
+import sys, re, os
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton,
     QTreeView, QFileDialog, QLineEdit,
     QMessageBox, QTextEdit, QSplitter,
     QToolBar, QStatusBar, QLabel,
-    QProgressBar, QCheckBox
+    QProgressBar, QCheckBox, QComboBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QAction
 
 from volume_model import VolumeTreeModel
@@ -18,14 +18,53 @@ from utils import convert_windows_path_to_docker
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-
+        self.settings = QSettings("Drem666", "DockerBackupTool")
         self.setWindowTitle("Docker Backup Tool — Pro Edition")
         self.resize(1100, 700)
 
         self._create_toolbar()
         self._create_ui()
         self._create_statusbar()
+        self._load_settings()
+        self._load_themes()
+        self._apply_theme(self.current_theme)   # restore last theme
+    # -----------------------
+    # Theme Switch
+    # -----------------------
+    def _load_themes(self):
+        self.themes = {}
+        themes_path = os.path.join(os.path.dirname(__file__), "config", "themes.qss")
+        if not os.path.exists(themes_path):
+            # Create a default themes.qss if missing
+            with open(themes_path, "w") as f:
+                f.write("/*Theme: Default*/\n/* (empty) */\n/*ThemeEnd*/")
+        with open(themes_path, "r") as f:
+            content = f.read()
+        # Regex to capture theme blocks
+        pattern = r"/\*Theme:\s*(.*?)\*/(.*?)/\*ThemeEnd\*/"
+        matches = re.findall(pattern, content, re.DOTALL)
+        for name, qss in matches:
+            self.themes[name.strip()] = qss.strip()
 
+        # Add theme combo to toolbar
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(self.themes.keys())
+        self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
+        self.toolbar.addWidget(QLabel("Theme:"))
+        self.toolbar.addWidget(self.theme_combo)
+
+        # Restore last theme
+        self.current_theme = self.settings.value("theme", "Default")
+        if self.current_theme in self.themes:
+            self.theme_combo.setCurrentText(self.current_theme)
+
+    def _on_theme_changed(self, theme_name):
+        self._apply_theme(theme_name)
+        self.settings.setValue("theme", theme_name)
+
+    def _apply_theme(self, theme_name):
+        qss = self.themes.get(theme_name, "")
+        self.setStyleSheet(qss)
     # -----------------------
     # UI CREATION
     # -----------------------
@@ -142,10 +181,17 @@ class MainWindow(QMainWindow):
         self.worker.error_signal.connect(self.on_error)
         self.worker.start()
 
+    def _load_settings(self):
+        # Restore last destination
+        last_dest = self.settings.value("last_destination", "")
+        if last_dest:
+            self.dest_input.setText(last_dest)
+
     def on_finished(self, msg):
         self.log(msg)
         self.progress.setVisible(False)
         self.set_ui_enabled(True)
+        self.settings.setValue("last_destination", self.dest_input.text())
         QMessageBox.information(self, "Success", msg)
 
     def on_error(self, err):
