@@ -1,0 +1,12 @@
+{
+  "name": "docker-backup-extension",
+  "version": "0.1.0",
+  "description": "Docker Extension for backing up Docker volumes",
+  "entrypoints": {
+    "frontend": "frontend/public/index.html",
+    "backend": "backend/app.py"
+  },
+  "docker": {
+    "version": "v1"
+  }
+}
