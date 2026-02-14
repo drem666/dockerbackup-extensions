@@ -130,8 +130,10 @@ class VolumeTreeModel(QAbstractItemModel):
         selected = []
 
         def recurse(node):
-            if node.check_state == Qt.Checked:
+            # Only include leaf nodes that are fully checked
+            if not node.children and node.check_state == Qt.Checked:
                 selected.append(node.path)
+
             for c in node.children:
                 recurse(c)
 
