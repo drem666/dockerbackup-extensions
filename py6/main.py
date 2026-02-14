@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QPushButton,
     QTreeView, QFileDialog, QLineEdit,
-    QMessageBox, QLabel
+    QMessageBox, QLabel, QFormLayout, QHBoxLayout
 )
 from PySide6.QtCore import Qt
 
@@ -30,9 +30,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tree)
 
         # Destination
+        form_layout = QFormLayout()
+
         self.dest_input = QLineEdit()
-        layout.addWidget(QLabel("Backup Destination:"))
-        layout.addWidget(self.dest_input)
+        self.dest_input.setPlaceholderText("Select backup destination...")
+
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self.browse_folder)
+
+        h_layout = QHBoxLayout()
+        h_layout.addWidget(self.dest_input)
+        h_layout.addWidget(browse_btn)
+
+        form_layout.addRow("Backup Destination:", h_layout)
+
+        layout.addLayout(form_layout)
 
         # Browse Button
         browse_btn = QPushButton("Browse...")

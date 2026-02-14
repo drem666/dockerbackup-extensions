@@ -7,7 +7,7 @@ class TreeNode:
         self.path = path
         self.parent = parent
         self.children = []
-        self.checked = False
+        self.check_state = Qt.Unchecked
 
     def child(self, row):
         return self.children[row]
@@ -37,6 +37,8 @@ class VolumeTreeModel(QAbstractItemModel):
             parent_node.children.append(node)
             self._add_children(node, child.get("children", []))
 
+    # ---- Required Model Methods ----
+
     def rowCount(self, parent):
         node = parent.internalPointer() if parent.isValid() else self.root_node
         return node.child_count()
@@ -46,14 +48,22 @@ class VolumeTreeModel(QAbstractItemModel):
 
     def index(self, row, column, parent):
         parent_node = parent.internalPointer() if parent.isValid() else self.root_node
+        if row < 0 or row >= parent_node.child_count():
+            return QModelIndex()
+
         child_node = parent_node.child(row)
         return self.createIndex(row, column, child_node)
 
     def parent(self, index):
+        if not index.isValid():
+            return QModelIndex()
+
         node = index.internalPointer()
         parent_node = node.parent
-        if parent_node == self.root_node or not parent_node:
+
+        if parent_node is None or parent_node == self.root_node:
             return QModelIndex()
+
         return self.createIndex(parent_node.row(), 0, parent_node)
 
     def data(self, index, role):
@@ -66,32 +76,61 @@ class VolumeTreeModel(QAbstractItemModel):
             return node.path.split("/")[-1] or node.path
 
         if role == Qt.CheckStateRole:
-            return Qt.Checked if node.checked else Qt.Unchecked
+            return node.check_state
 
         return None
 
     def flags(self, index):
-        return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
+        return (
+            Qt.ItemIsEnabled
+            | Qt.ItemIsSelectable
+            | Qt.ItemIsUserCheckable
+        )
+
+    # ---- Checkbox Logic ----
 
     def setData(self, index, value, role):
         if role == Qt.CheckStateRole:
             node = index.internalPointer()
-            node.checked = value == Qt.Checked
-            self._set_children_checked(node, node.checked)
-            self.dataChanged.emit(index, index)
+            node.check_state = value
+
+            # Update children
+            self._set_children_state(node, value)
+
+            # Update parents
+            self._update_parent_state(node.parent)
+
+            # Refresh entire tree visually
+            self.layoutChanged.emit()
+
             return True
         return False
 
-    def _set_children_checked(self, node, state):
+    def _set_children_state(self, node, state):
         for child in node.children:
-            child.checked = state
-            self._set_children_checked(child, state)
+            child.check_state = state
+            self._set_children_state(child, state)
+
+    def _update_parent_state(self, parent):
+        if parent is None:
+            return
+
+        states = {child.check_state for child in parent.children}
+
+        if len(states) == 1:
+            parent.check_state = states.pop()
+        else:
+            parent.check_state = Qt.PartiallyChecked
+
+        self._update_parent_state(parent.parent)
+
+    # ---- Utility ----
 
     def get_selected_paths(self):
         selected = []
 
         def recurse(node):
-            if node.checked:
+            if node.check_state == Qt.Checked:
                 selected.append(node.path)
             for c in node.children:
                 recurse(c)
