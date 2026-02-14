@@ -13,7 +13,7 @@ from PySide6.QtGui import QAction
 from volume_model import VolumeTreeModel
 from backup_worker import BackupWorker
 from utils import convert_windows_path_to_docker
-
+from settings_dialog import SettingsDialog
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -25,9 +25,9 @@ class MainWindow(QMainWindow):
         self._create_toolbar()
         self._create_ui()
         self._create_statusbar()
-        self._load_settings()
         self._load_themes()
         self._apply_theme(self.current_theme)   # restore last theme
+        self._load_settings()    
     # -----------------------
     # Theme Switch
     # -----------------------
@@ -36,6 +36,7 @@ class MainWindow(QMainWindow):
         themes_path = os.path.join(os.path.dirname(__file__), "config", "themes.qss")
         if not os.path.exists(themes_path):
             # Create a default themes.qss if missing
+            os.makedirs(os.path.dirname(themes_path), exist_ok=True)
             with open(themes_path, "w") as f:
                 f.write("/*Theme: Default*/\n/* (empty) */\n/*ThemeEnd*/")
         with open(themes_path, "r") as f:
@@ -47,16 +48,20 @@ class MainWindow(QMainWindow):
             self.themes[name.strip()] = qss.strip()
 
         # Add theme combo to toolbar
+        self.toolbar.addSeparator()
+        self.toolbar.addWidget(QLabel("Theme:"))
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(self.themes.keys())
         self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
-        self.toolbar.addWidget(QLabel("Theme:"))
         self.toolbar.addWidget(self.theme_combo)
 
         # Restore last theme
-        self.current_theme = self.settings.value("theme", "Default")
-        if self.current_theme in self.themes:
-            self.theme_combo.setCurrentText(self.current_theme)
+        saved_theme = self.settings.value("theme", "Default")
+        if saved_theme in self.themes:
+            self.current_theme = saved_theme
+        else:
+            self.current_theme = "Default" if "Default" in self.themes else next(iter(self.themes))
+        self.theme_combo.setCurrentText(self.current_theme)
 
     def _on_theme_changed(self, theme_name):
         self._apply_theme(theme_name)
@@ -72,6 +77,7 @@ class MainWindow(QMainWindow):
     def _create_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
         self.addToolBar(toolbar)
+        self.toolbar = toolbar
 
         refresh_action = QAction("Refresh Volumes", self)
         refresh_action.triggered.connect(self.refresh_volumes)
@@ -84,6 +90,41 @@ class MainWindow(QMainWindow):
         self.mirror_checkbox = QCheckBox("Mirror Mode (--delete)")
         self.mirror_checkbox.setChecked(True)
         toolbar.addWidget(self.mirror_checkbox)
+
+        toolbar.addSeparator()
+
+        # Settings button
+        settings_action = QAction("Settings", self)
+        settings_action.triggered.connect(self.open_settings_dialog)
+        toolbar.addAction(settings_action)
+
+        # Theme combo will be added later in _load_themes
+
+    def open_settings_dialog(self):
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            self._apply_destination_settings()
+
+    def _apply_destination_settings(self):
+        use_default = self.settings.value("use_default", "false") == "true"
+        default_win_path = self.settings.value("default_win_path", "")
+
+        if use_default and default_win_path:
+            docker_path = convert_windows_path_to_docker(default_win_path)
+            self.dest_input.setText(docker_path)
+            self.dest_input.setReadOnly(True)
+            # Disable browse button (if you have a reference to it)
+            # You'll need to store browse_btn as an instance variable, e.g., self.browse_btn
+            if hasattr(self, 'browse_btn'):
+                self.browse_btn.setEnabled(False)
+        else:
+            self.dest_input.setReadOnly(False)
+            if hasattr(self, 'browse_btn'):
+                self.browse_btn.setEnabled(True)
+            # Load last destination (auto-saved)
+            last_dest = self.settings.value("last_destination", "")
+            if last_dest:
+                self.dest_input.setText(last_dest)
 
     def _create_ui(self):
         central = QWidget()
@@ -118,12 +159,13 @@ class MainWindow(QMainWindow):
         self.dest_input = QLineEdit()
         self.dest_input.setPlaceholderText("Select backup destination...")
 
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self.browse_folder)
+        self.browse_btn = QPushButton("Browse")
+        self.browse_btn.clicked.connect(self.browse_folder)
+        dest_layout.addWidget(self.browse_btn)
 
         dest_layout.addWidget(QLabel("Backup Destination:"))
         dest_layout.addWidget(self.dest_input)
-        dest_layout.addWidget(browse_btn)
+        dest_layout.addWidget(self.browse_btn)
 
         main_layout.addLayout(dest_layout)
 
@@ -146,6 +188,7 @@ class MainWindow(QMainWindow):
             self.dest_input.setText(docker_path)
 
     def refresh_volumes(self):
+        print(">>> refresh_volumes called")
         self.log("Refreshing volume list...")
         self.model = VolumeTreeModel()
         self.tree.setModel(self.model)
@@ -154,6 +197,7 @@ class MainWindow(QMainWindow):
 
     def run_backup(self):
         selected = self.model.get_selected_paths()
+        # print(f"run_backup: model id = {id(self.model)}")
         dest = self.dest_input.text().strip()
 
         if not selected:
@@ -182,16 +226,16 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _load_settings(self):
-        # Restore last destination
-        last_dest = self.settings.value("last_destination", "")
-        if last_dest:
-            self.dest_input.setText(last_dest)
+        self._apply_destination_settings()
 
     def on_finished(self, msg):
         self.log(msg)
         self.progress.setVisible(False)
         self.set_ui_enabled(True)
-        self.settings.setValue("last_destination", self.dest_input.text())
+        # Save destination only if not locked
+        use_default = self.settings.value("use_default", "false") == "true"
+        if not use_default:
+            self.settings.setValue("last_destination", self.dest_input.text())
         QMessageBox.information(self, "Success", msg)
 
     def on_error(self, err):
