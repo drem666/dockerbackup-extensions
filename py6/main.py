@@ -188,16 +188,27 @@ class MainWindow(QMainWindow):
             self.dest_input.setText(docker_path)
 
     def refresh_volumes(self):
+        """
+        FIXED: Instead of creating a new model, update the existing one.
+        This preserves the checkbox states.
+        """
         print(">>> refresh_volumes called")
         self.log("Refreshing volume list...")
-        self.model = VolumeTreeModel()
-        self.tree.setModel(self.model)
+        
+        # Save the current checked states
+        checked_paths = self.model.get_selected_paths()
+        
+        # Rebuild the model
+        self.model.rebuild()
+        
+        # Restore the checked states
+        self.model.restore_checked_states(checked_paths)
+        
         self.tree.expandToDepth(1)
         self.log("Volume list refreshed.")
 
     def run_backup(self):
         selected = self.model.get_selected_paths()
-        # print(f"run_backup: model id = {id(self.model)}")
         dest = self.dest_input.text().strip()
 
         if not selected:
@@ -205,52 +216,42 @@ class MainWindow(QMainWindow):
             return
 
         if not dest:
-            QMessageBox.warning(self, "Error", "No backup destination selected.")
+            QMessageBox.warning(self, "Error", "No destination selected.")
             return
 
-        # Optional: verify that the destination is reachable
-        # (e.g., try to create a test file, but that might be overkill)
-        self.progress.setVisible(True)
+        # Add mirror mode flag if checked
+        if self.mirror_checkbox.isChecked():
+            # This will be handled in utils.py by adding --delete to rsync_flags
+            pass
 
-        self.log(f"Selected paths: {selected}")
-        self.log(f"Destination: {dest}")
-
+        self.log(f"Starting backup of {len(selected)} items to {dest}...")
+        self.run_action.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)  # Indeterminate
 
-        self.set_ui_enabled(False)
-
         self.worker = BackupWorker(selected, dest)
-        self.worker.finished_signal.connect(self.on_finished)
-        self.worker.error_signal.connect(self.on_error)
+        self.worker.finished_signal.connect(self.on_backup_finished)
+        self.worker.error_signal.connect(self.on_backup_error)
         self.worker.start()
 
+    def on_backup_finished(self, message):
+        self.log(message)
+        self.run_action.setEnabled(True)
+        self.progress.setVisible(False)
+        QMessageBox.information(self, "Success", message)
+
+    def on_backup_error(self, error):
+        self.log(f"Error: {error}")
+        self.run_action.setEnabled(True)
+        self.progress.setVisible(False)
+        QMessageBox.critical(self, "Backup Failed", error)
+
+    def log(self, msg):
+        self.log_output.append(msg)
+        
     def _load_settings(self):
+        """Load saved settings on startup"""
         self._apply_destination_settings()
-
-    def on_finished(self, msg):
-        self.log(msg)
-        self.progress.setVisible(False)
-        self.set_ui_enabled(True)
-        # Save destination only if not locked
-        use_default = self.settings.value("use_default", "false") == "true"
-        if not use_default:
-            self.settings.setValue("last_destination", self.dest_input.text())
-        QMessageBox.information(self, "Success", msg)
-
-    def on_error(self, err):
-        self.log(f"ERROR: {err}")
-        self.progress.setVisible(False)
-        self.set_ui_enabled(True)
-        QMessageBox.critical(self, "Backup Failed", err)
-
-    def set_ui_enabled(self, enabled):
-        self.tree.setEnabled(enabled)
-        self.run_action.setEnabled(enabled)
-
-    def log(self, message):
-        self.log_output.append(message)
-        self.status.showMessage(message, 5000)
 
 
 if __name__ == "__main__":

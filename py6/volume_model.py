@@ -37,6 +37,58 @@ class VolumeTreeModel(QAbstractItemModel):
             parent_node.children.append(node)
             self._add_children(node, child.get("children", []))
 
+    def rebuild(self):
+        """
+        FIXED: Rebuild the model while preserving the tree structure.
+        This method clears and rebuilds the tree without creating a new model instance.
+        """
+        self.beginResetModel()
+        # Clear existing children
+        self.root_node.children = []
+        self.root_node.check_state = Qt.Unchecked
+        # Rebuild
+        self._build_model()
+        self.endResetModel()
+
+    def restore_checked_states(self, checked_paths):
+        """
+        FIXED: Restore previously checked paths after a rebuild.
+        
+        Args:
+            checked_paths: List of paths that were previously checked
+        """
+        if not checked_paths:
+            return
+            
+        # Convert to set for faster lookup
+        checked_set = set(checked_paths)
+        
+        def restore_node(node):
+            if node.path in checked_set:
+                node.check_state = Qt.Checked
+                # Also mark all children as checked
+                self._set_children_state(node, Qt.Checked)
+            # Recurse through children
+            for child in node.children:
+                restore_node(child)
+        
+        restore_node(self.root_node)
+        
+        # Update parent states based on restored children
+        def update_parents(node):
+            for child in node.children:
+                update_parents(child)
+            self._update_parent_state(node.parent)
+        
+        update_parents(self.root_node)
+        
+        # Emit signal to refresh UI
+        self.dataChanged.emit(
+            self.index(0, 0, QModelIndex()),
+            self.index(self.rowCount(QModelIndex())-1, 0, QModelIndex()),
+            [Qt.CheckStateRole]
+        )
+
     # ---- Required Model Methods ----
 
     def rowCount(self, parent):
@@ -92,11 +144,12 @@ class VolumeTreeModel(QAbstractItemModel):
     def setData(self, index, value, role):
         if role == Qt.CheckStateRole:
             node = index.internalPointer()
-            # print(f"\n>>> setData: {node.path} set to {value}")
+            print(f"setData: node id={id(node)}, path={node.path}")
             node.check_state = value
             self._set_children_state(node, value)
             self._update_parent_state(node.parent)
-            # self.layoutChanged.emit()
+            
+            # Emit dataChanged for the entire tree
             top_left = self.index(0, 0, QModelIndex())
             bottom_right = self.index(self.rowCount(QModelIndex())-1, 0, QModelIndex())
             self.dataChanged.emit(top_left, bottom_right, [Qt.CheckStateRole])
@@ -105,7 +158,6 @@ class VolumeTreeModel(QAbstractItemModel):
 
     def _set_children_state(self, node, state):
         for child in node.children:
-            # print(f"    child {child.path} set to {state}")
             child.check_state = state
             self._set_children_state(child, state)
 
@@ -118,34 +170,50 @@ class VolumeTreeModel(QAbstractItemModel):
             parent.check_state = states.pop()
         else:
             parent.check_state = Qt.PartiallyChecked
-        if parent.check_state != old_state:
-            # print(f"    parent {parent.path} changed from {old_state} to {parent.check_state}")
-            pass
         self._update_parent_state(parent.parent)
 
     # ---- Utility ----
 
-    def get_selected_paths(self):
-        # print(f"get_selected_paths: root_node id = {id(self.root_node)}")
-        # print(f"get_selected_paths: model id = {id(self)}")
-        selected = []
-        # print("\n--- get_selected_paths called ---")
+    # def get_selected_paths(self):
+    #     """
+    #     Get all checked paths, avoiding duplicates where parent is already selected.
+    #     Returns a list of paths that need to be backed up.
+    #     """
+    #     selected = []
 
+    #     def recurse(node):
+    #         # If node is checked and its parent is not fully checked, add it
+    #         if node.check_state == Qt.Checked:
+    #             parent = node.parent
+    #             if parent is None or parent.check_state != Qt.Checked:
+    #                 selected.append(node.path)
+    #         # Recurse to handle partially checked parents
+    #         for child in node.children:
+    #             recurse(child)
+
+    #     recurse(self.root_node)
+    #     return selected
+
+    def get_selected_paths(self):
+        selected = []
+        print("\n--- get_selected_paths called ---")
+        
+        counter = [0]  # Use list to modify in nested function
+        
         def recurse(node, indent=""):
-            # print(f"{indent}Node: {node.path} (id={id(node)}) state={node.check_state}")
-            # print(f"{indent}Node: {node.path} | CheckState: {node.check_state} | Children: {len(node.children)}")
-            # If node is checked and its parent is not fully checked, add it
+            # Only print checked/partial nodes, or first 10 nodes
+            if node.check_state != Qt.Unchecked or counter[0] < 10:
+                print(f"{indent}Node: {node.path} | id={id(node)} | CheckState: {node.check_state} | Children: {len(node.children)}")
+                counter[0] += 1
+            
             if node.check_state == Qt.Checked:
                 parent = node.parent
                 if parent is None or parent.check_state != Qt.Checked:
-                    # print(f"{indent}  --> ADDING: {node.path}")
                     selected.append(node.path)
-            # Recurse to handle partially checked parents
+            
             for child in node.children:
                 recurse(child, indent + "  ")
-
+        
         recurse(self.root_node)
-        # print(f"Selected paths: {selected}\n")
+        print(f"Selected paths: {selected}\n")
         return selected
-
-
