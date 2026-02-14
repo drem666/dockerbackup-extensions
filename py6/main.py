@@ -125,6 +125,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", "No backup destination selected.")
             return
 
+        # Optional: verify that the destination is reachable
+        # (e.g., try to create a test file, but that might be overkill)
+        self.progress.setVisible(True)
+
         self.log(f"Selected paths: {selected}")
         self.log(f"Destination: {dest}")
 

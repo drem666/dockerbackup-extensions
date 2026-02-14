@@ -59,15 +59,16 @@ def list_volumes():
 def convert_windows_path_to_docker(win_path):
     if not win_path:
         return ""
-
+    # Normalize to backslashes for Windows drive detection
+    win_path = win_path.replace('/', '\\')
     import re
     match = re.match(r"^([A-Za-z]):\\(.*)", win_path)
     if not match:
+        # If it still doesn't match, maybe it's already a Docker path? Print a warning.
+        print(f"Warning: Could not convert Windows path: {win_path}")
         return ""
-
     drive = match.group(1).lower()
     rest = match.group(2).replace("\\", "/")
-
     return f"{SETTINGS['docker_host_mount_prefix']}{drive}/{rest}"
 
 
