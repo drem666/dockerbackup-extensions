@@ -1,4 +1,4 @@
-# Docker Backup Tool — Pro Edition (PySide6)
+# Docker Backup Tool (PySide6)
 
 A professional desktop application for backing up Docker volumes using **rsync** via WSL.
 
@@ -72,6 +72,7 @@ docker-backup-pyside6/
 - WSL installed
 - `docker-desktop` WSL distro
 - **rsync installed inside WSL** ⚠️
+- ⚠️MOST IMPORTANT: Docker-desktop must be running.  
 
 ---
 
@@ -110,6 +111,20 @@ wsl -d docker-desktop sh -c "which rsync"
 Expected output: `/usr/bin/rsync`
 
 ---
+
+### Step 3: START Docker-Desktop (CRITICAL!)
+```bash
+# ⚠️MOST IMPORTANT (Otherwise GUI wont run)
+# The volume_models.py depends on docker running and the mounted vhdx to list volumes.
+# If not found, you will get an error:
+  File "C:\dockers\docker-backup-extension\py6\main.py", line 140, in _create_ui
+    self.model = VolumeTreeModel()
+  File "C:\dockers\docker-backup-extension\py6\volume_model.py", line 28, in __init__
+    self._build_model()
+  File "C:\dockers\docker-backup-extension\py6\volume_model.py", line 31, in _build_model
+    volumes = list_volumes()
+subprocess.CalledProcessError: Command '['wsl', '-d', 'docker-desktop', 'sh', '-c', "cd '/tmp/docker-desktop-root/mnt/docker-desktop-disk/' && find . \\( -type d -o -type f \\)"]' returned non-zero exit status 2.
+```
 
 ## ▶️ Running the App
 
@@ -341,3 +356,5 @@ Built with 🧠 + 🐳 + ⚡
 - [ ] Monitor progress in log panel
 
 ---
+# LICENSE
+MIT

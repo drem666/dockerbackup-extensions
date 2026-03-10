@@ -49,3 +49,4 @@ env/
 venv/
 ENV/
 .aider*
+.llm-sessions/ 

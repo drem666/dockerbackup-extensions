@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.settings = QSettings("Drem666", "DockerBackupTool")
-        self.setWindowTitle("Docker Backup Tool — Pro Edition")
+        self.setWindowTitle("Docker Backup Tool")
         self.resize(1100, 700)
 
         self._create_toolbar()

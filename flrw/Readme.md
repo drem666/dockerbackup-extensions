@@ -82,6 +82,8 @@ Poweriso (iso/daa) archives, 7zip (7z/zip) archives
 | Path errors | Use absolute paths starting with / |
 | Permission denied | Run WSL commands with -u root |
 
+# LICENSE
+MIT
 
 Developed with 🧠 by DeepSeek & ChatGPT (2025)
 Always test backups before relying on them!
