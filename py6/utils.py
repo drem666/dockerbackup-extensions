@@ -187,7 +187,7 @@ def run_restore(archive_path, paths_to_restore=None):
     subprocess.run(cmd, check=True)
 
 def convert_docker_path_to_windows(docker_path):
-    """Convert a WSL path like /mnt/host/c/... to Windows path C:\..."""
+    r"""Convert a WSL path like /mnt/host/c/... to Windows path C:\..."""
     prefix = SETTINGS["docker_host_mount_prefix"]
     if docker_path.startswith(prefix):
         remainder = docker_path[len(prefix):].lstrip('/')
