@@ -1,4 +1,4 @@
-import sys, re, os
+import sys, re, os, subprocess
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton,
@@ -253,6 +253,33 @@ class MainWindow(QMainWindow):
         """Load saved settings on startup"""
         self._apply_destination_settings()
 
+    def check_rsync():
+        try:
+            subprocess.run(
+                ["wsl", "-d", "docker-desktop", "sh", "-c", "command -v rsync"],
+                check=True,
+                capture_output=True
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    if not check_rsync():
+        reply = QMessageBox.question(
+            self,
+            "rsync Missing",
+            "rsync is not installed in the docker-desktop WSL distro.\n\n"
+            "Install it now? (requires admin rights)",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            subprocess.run(
+                ["wsl", "-d", "docker-desktop", "-u", "root", "sh", "-c", "apk update && apk add rsync"],
+                check=True
+            )
+            QMessageBox.information(self, "Success", "rsync installed. Please restart the backup.")
+        else:
+            QMessageBox.warning(self, "Warning", "Backup will fail without rsync.")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

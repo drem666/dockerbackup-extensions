@@ -153,3 +153,63 @@ class VolumeTreeModel(QAbstractItemModel):
         recurse(self.root_node)
         # print(f"Selected paths: {selected}\n")
         return selected
+
+    def rebuild(self):
+        """Completely rebuild the tree model from scratch."""
+        self.beginResetModel()
+        self.root_node = TreeNode("/")
+        self._build_model()
+        self.endResetModel()
+
+    def find_node(self, path, node=None):
+        """Find a tree node by its full path."""
+        if node is None:
+            node = self.root_node
+        if node.path == path:
+            return node
+        for child in node.children:
+            result = self.find_node(path, child)
+            if result:
+                return result
+        return None
+
+    def _set_subtree_state(self, node, state):
+        """Set the check state of a node and all its descendants."""
+        node.check_state = state
+        for child in node.children:
+            self._set_subtree_state(child, state)
+
+    def _recompute_parent_states(self):
+        """Update all parent nodes' check states based on their children."""
+        def recurse(node):
+            for child in node.children:
+                recurse(child)
+            if node.parent:
+                states = {child.check_state for child in node.parent.children}
+                if len(states) == 1:
+                    node.parent.check_state = states.pop()
+                else:
+                    node.parent.check_state = Qt.CheckState.PartiallyChecked
+        recurse(self.root_node)
+
+    def restore_checked_states(self, paths):
+        """
+        Restore checked states from a list of previously selected paths.
+        paths: list of full paths (strings) that were checked.
+        """
+        # First, reset everything to unchecked
+        self._set_subtree_state(self.root_node, Qt.CheckState.Unchecked)
+
+        # Then set each saved path and its descendants to checked
+        for path in paths:
+            node = self.find_node(path)
+            if node:
+                self._set_subtree_state(node, Qt.CheckState.Checked)
+
+        # Update all parent states to reflect partial/checked correctly
+        self._recompute_parent_states()
+
+        # Notify the view that the whole model's check states changed
+        top_left = self.index(0, 0, QModelIndex())
+        bottom_right = self.index(self.rowCount(QModelIndex()) - 1, 0, QModelIndex())
+        self.dataChanged.emit(top_left, bottom_right, [Qt.CheckStateRole])
