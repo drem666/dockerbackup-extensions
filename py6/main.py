@@ -1,19 +1,19 @@
 import sys, re, os, subprocess
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget,
-    QVBoxLayout, QHBoxLayout, QPushButton,
-    QTreeView, QFileDialog, QLineEdit,
-    QMessageBox, QTextEdit, QSplitter,
-    QToolBar, QStatusBar, QLabel,
-    QProgressBar, QCheckBox, QComboBox
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QTreeView, QFileDialog, QLineEdit, QMessageBox, QTextEdit, QSplitter,
+    QToolBar, QStatusBar, QLabel, QProgressBar, QCheckBox, QComboBox, QDialog, QListWidget, QMessageBox
 )
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QAction
 
 from volume_model import VolumeTreeModel
 from backup_worker import BackupWorker
-from utils import convert_windows_path_to_docker
+from utils import convert_windows_path_to_docker, convert_docker_path_to_windows
 from settings_dialog import SettingsDialog
+from backup_history import BackupHistory
+from archive_worker import ArchiveWorker
+from restore_worker import RestoreWorker
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -23,11 +23,40 @@ class MainWindow(QMainWindow):
         self.resize(1100, 700)
 
         self._create_toolbar()
+        # Backup mode selector
+        self.toolbar.addSeparator()
+        self.toolbar.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Copy (rsync)", "Archive (tar.gz)"])
+        self.toolbar.addWidget(self.mode_combo)
+
+        # History button
+        history_btn = QPushButton("Backup History")
+        history_btn.clicked.connect(self.open_history_dialog)
+        self.toolbar.addWidget(history_btn)
+
         self._create_ui()
         self._create_statusbar()
         self._load_themes()
         self._apply_theme(self.current_theme)   # restore last theme
-        self._load_settings()    
+        self._load_settings()
+        self.ensure_rsync()     
+
+    def on_archive_finished(self, message, archive_path):
+        self.log(message)
+        self.run_action.setEnabled(True)
+        self.progress.setVisible(False)
+        QMessageBox.information(self, "Success", message)
+
+        # Update history
+        dest = self.dest_input.text().strip()
+        win_path = convert_docker_path_to_windows(dest)
+        if win_path:
+            manifest_path = os.path.join(win_path, "backup_manifest.json")
+            history = BackupHistory(manifest_path)
+            # archive_path is a WSL path; store relative or full? We'll store the filename
+            archive_filename = os.path.basename(archive_path)
+            history.add_entry(self.model.get_selected_paths(), archive_filename)
     # -----------------------
     # Theme Switch
     # -----------------------
@@ -70,6 +99,10 @@ class MainWindow(QMainWindow):
     def _apply_theme(self, theme_name):
         qss = self.themes.get(theme_name, "")
         self.setStyleSheet(qss)
+        # Force repaint of tree view to refresh checkboxes
+        if hasattr(self, 'tree'):
+            self.tree.viewport().update()
+            self.tree.update()  # sometimes needed
     # -----------------------
     # UI CREATION
     # -----------------------
@@ -98,7 +131,7 @@ class MainWindow(QMainWindow):
         settings_action.triggered.connect(self.open_settings_dialog)
         toolbar.addAction(settings_action)
 
-        # Theme combo will be added later in _load_themes
+
 
     def open_settings_dialog(self):
         dialog = SettingsDialog(self)
@@ -139,6 +172,7 @@ class MainWindow(QMainWindow):
         self.tree = QTreeView()
         self.model = VolumeTreeModel()
         self.tree.setModel(self.model)
+        self.tree.setHeaderHidden(True)
         self.tree.expandToDepth(1)
 
         splitter.addWidget(self.tree)
@@ -176,6 +210,26 @@ class MainWindow(QMainWindow):
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         self.status.addPermanentWidget(self.progress)
+
+    def open_history_dialog(self):
+        # Determine manifest path based on current destination? Or let user choose?
+        # For simplicity, we'll use the current destination folder as base.
+        dest = self.dest_input.text().strip()
+        if not dest:
+            QMessageBox.warning(self, "Error", "Please select a destination folder first.")
+            return
+        # Convert dest (WSL path) to Windows path for manifest
+        # We need a function to convert back; we can store manifest in the same folder as archives.
+        # For now, we'll assume the destination is a WSL path pointing to a Windows folder.
+        # We'll store manifest in that folder (as Windows path).
+        # We'll need a helper to convert WSL path to Windows. Let's add a function in utils.
+        win_path = convert_docker_path_to_windows(dest)
+        if not win_path:
+            QMessageBox.warning(self, "Error", "Cannot determine Windows path for manifest.")
+            return
+        manifest_path = os.path.join(win_path, "backup_manifest.json")
+        dlg = BackupHistoryDialog(manifest_path, self)
+        dlg.exec()
 
     # -----------------------
     # FUNCTIONS
@@ -219,20 +273,30 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", "No destination selected.")
             return
 
-        # Add mirror mode flag if checked
-        if self.mirror_checkbox.isChecked():
-            # This will be handled in utils.py by adding --delete to rsync_flags
-            pass
+        mode = self.mode_combo.currentText()
 
-        self.log(f"Starting backup of {len(selected)} items to {dest}...")
-        self.run_action.setEnabled(False)
-        self.progress.setVisible(True)
-        self.progress.setRange(0, 0)  # Indeterminate
+        if mode == "Copy (rsync)":
+            # Existing rsync logic
+            self.log(f"Starting rsync backup of {len(selected)} items to {dest}...")
+            self.run_action.setEnabled(False)
+            self.progress.setVisible(True)
+            self.progress.setRange(0, 0)
 
-        self.worker = BackupWorker(selected, dest)
-        self.worker.finished_signal.connect(self.on_backup_finished)
-        self.worker.error_signal.connect(self.on_backup_error)
-        self.worker.start()
+            self.worker = BackupWorker(selected, dest)
+            self.worker.finished_signal.connect(self.on_backup_finished)
+            self.worker.error_signal.connect(self.on_backup_error)
+            self.worker.start()
+        else:  # Archive mode
+            self.log(f"Creating compressed archive of {len(selected)} items in {dest}...")
+            self.run_action.setEnabled(False)
+            self.progress.setVisible(True)
+            self.progress.setRange(0, 0)
+
+            self.archive_worker = ArchiveWorker(selected, dest)
+            # 👇 Add these two connections right here
+            self.archive_worker.finished_signal.connect(self.on_archive_finished)
+            self.archive_worker.error_signal.connect(self.on_backup_error)  # reuse same error handler
+            self.archive_worker.start()
 
     def on_backup_finished(self, message):
         self.log(message)
@@ -253,7 +317,8 @@ class MainWindow(QMainWindow):
         """Load saved settings on startup"""
         self._apply_destination_settings()
 
-    def check_rsync():
+    def check_rsync_installed(self):
+        """Check if rsync is installed in docker-desktop WSL distro."""
         try:
             subprocess.run(
                 ["wsl", "-d", "docker-desktop", "sh", "-c", "command -v rsync"],
@@ -264,22 +329,102 @@ class MainWindow(QMainWindow):
         except subprocess.CalledProcessError:
             return False
 
-    if not check_rsync():
-        reply = QMessageBox.question(
-            self,
-            "rsync Missing",
-            "rsync is not installed in the docker-desktop WSL distro.\n\n"
-            "Install it now? (requires admin rights)",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            subprocess.run(
-                ["wsl", "-d", "docker-desktop", "-u", "root", "sh", "-c", "apk update && apk add rsync"],
-                check=True
+    def ensure_rsync(self):
+        """Prompt user to install rsync if missing."""
+        if not self.check_rsync_installed():
+            reply = QMessageBox.question(
+                self,
+                "rsync Missing",
+                "rsync is not installed in the docker-desktop WSL distro.\n\n"
+                "Install it now? (requires admin rights)",
+                QMessageBox.Yes | QMessageBox.No
             )
-            QMessageBox.information(self, "Success", "rsync installed. Please restart the backup.")
-        else:
-            QMessageBox.warning(self, "Warning", "Backup will fail without rsync.")
+            if reply == QMessageBox.Yes:
+                try:
+                    subprocess.run(
+                        ["wsl", "-d", "docker-desktop", "-u", "root", "sh", "-c", "apk update && apk add rsync"],
+                        check=True
+                    )
+                    QMessageBox.information(self, "Success", "rsync installed.")
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Installation failed: {e}")
+            else:
+                QMessageBox.warning(self, "Warning", "Backup will fail without rsync.")
+
+    def restore_from_archive(self, archive_wsl_path, paths_to_restore):
+        self.restore_worker = RestoreWorker(archive_wsl_path, paths_to_restore)
+        self.restore_worker.finished_signal.connect(self.on_restore_finished)
+        self.restore_worker.error_signal.connect(self.on_restore_error)
+        self.restore_worker.start()
+        self.log(f"Starting restore from {archive_wsl_path}...")
+        # Disable UI etc.
+
+    def on_restore_finished(self, message):
+        self.log(message)
+        QMessageBox.information(self, "Restore Complete", message)
+
+    def on_restore_error(self, error):
+        self.log(f"Restore error: {error}")
+        QMessageBox.critical(self, "Restore Failed", error)
+
+class BackupHistoryDialog(QDialog):
+    def __init__(self, manifest_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Backup History")
+        self.setMinimumSize(600, 400)
+        self.manifest_path = manifest_path
+        self.history = BackupHistory(manifest_path)
+
+        layout = QVBoxLayout()
+
+        self.list_widget = QListWidget()
+        self.populate_list()
+        layout.addWidget(self.list_widget)
+
+        btn_layout = QHBoxLayout()
+        restore_btn = QPushButton("Restore Selected")
+        restore_btn.clicked.connect(self.restore_selected)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(restore_btn)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        self.setLayout(layout)
+
+    def populate_list(self):
+        for entry in self.history.get_entries():
+            text = f"{entry['timestamp']} - {entry['archive']} ({len(entry['paths'])} items)"
+            self.list_widget.addItem(text)
+            # Store entry data in item
+            item = self.list_widget.item(self.list_widget.count()-1)
+            item.setData(Qt.UserRole, entry)
+
+    def restore_selected(self):
+        current = self.list_widget.currentItem()
+        if not current:
+            QMessageBox.warning(self, "Error", "No backup selected.")
+            return
+        entry = current.data(Qt.UserRole)
+        archive_filename = entry['archive']
+        # Archive is stored in the same folder as manifest
+        archive_path = os.path.join(os.path.dirname(self.manifest_path), archive_filename)
+        # Convert to WSL path for restore
+        wsl_archive = convert_windows_path_to_docker(archive_path)
+        if not wsl_archive:
+            QMessageBox.critical(self, "Error", "Cannot determine WSL path for archive.")
+            return
+
+        # Ask user if they want to restore all or select specific paths
+        reply = QMessageBox.question(self, "Restore",
+                                     "Restore all contents of this backup?\n"
+                                     "Click No to select specific items.",
+                                     QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+        if reply == QMessageBox.Cancel:
+            return
+
+        # For now, we'll just restore all. Later we can add a selection dialog.
+        self.parent().restore_from_archive(wsl_archive, paths=None if reply == QMessageBox.Yes else [])
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
