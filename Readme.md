@@ -9,6 +9,12 @@ PySide6 version
 Created with a combination of DeepSeek (design), ChatGPT(build), DeepSeek (complete update of UI), Claude (Resolution of the error in node matching while backing up)
 
 ## ScreenShots
+## Updated Restore/Archive
+![Py6New](screenshots/Py6new.png)
+![Py6New Settings](screenshots/py6new-settings.png)
+![Py6New Backuphistory](screenshots/Py6new-BackupHistory.png)
+
+## Older Version
 ![Screenshot 2026 03 11 050134](screenshots/Screenshot%202026-03-11%20050134.png)
 ![Screenshot 2026 03 11 050226](screenshots/Screenshot%202026-03-11%20050226.png)
 ![Screenshot 2026 03 11 050340](screenshots/Screenshot%202026-03-11%20050340.png)
